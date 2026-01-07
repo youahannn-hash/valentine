@@ -1,0 +1,237 @@
+<!doctype html>
+
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Валентинка — конверт</title>
+  <style>
+    :root{
+      --box-w: 420px; /* размер конверта */
+      --box-h: 300px;
+      --shake-dur: 420ms;
+    }
+    *{box-sizing:border-box}
+    html,body{
+      height:100%;
+      margin:0;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;
+      background: linear-gradient(180deg,#ffeef0 0%, #fff 60%);
+      -webkit-font-smoothing:antialiased;
+      -moz-osx-font-smoothing:grayscale;
+    }
+    .wrap{
+      min-height:100%;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:40px;
+    }/* контейнер фиксированного размера — все три png будут отображаться одинаково по месту */
+.card{
+  width:var(--box-w);
+  height:var(--box-h);
+  position:relative;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  cursor:pointer;
+  user-select:none;
+}
+
+/* Само изображение — масштабируется ПРОПОРЦИОНАЛЬНО (object-fit: contain) чтобы не искажать */
+.card img{
+  width:100%;
+  height:100%;
+  object-fit:contain; /* сохраняет пропорции, не растягивает */
+  display:block;
+  pointer-events:none; /* клики идут на .card */
+}
+
+/* Эффект резко дерганого движения (shake) */
+@keyframes shake {
+  0%{transform:translateX(0)}
+  15%{transform:translateX(-10px) rotate(-4deg)}
+  30%{transform:translateX(10px) rotate(4deg)}
+  45%{transform:translateX(-8px) rotate(-2deg)}
+  60%{transform:translateX(6px) rotate(2deg)}
+  75%{transform:translateX(-4px) rotate(-1deg)}
+  100%{transform:translateX(0) rotate(0)}
+}
+.shake{
+  animation:shake var(--shake-dur) ease-in-out;
+}
+
+/* Появляющиеся плавающие сердечки (фон) */
+.hearts{
+  position:absolute;
+  left:0;right:0;top:0;bottom:0;
+  overflow:hidden;
+  pointer-events:none;
+  z-index:0;
+}
+.heart{
+  position:absolute;
+  width:26px;
+  height:26px;
+  transform:translateY(120%);
+  opacity:0.95;
+  will-change:transform,opacity;
+  background-repeat:no-repeat;
+  background-size:contain;
+  background-image:radial-gradient(circle at 30% 30%, #fff4 10%, transparent 11%); /* tiny highlight */
+}
+
+@keyframes floatUp {
+  0%{transform:translateY(120%) scale(0.6); opacity:0}
+  10%{opacity:0.95}
+  100%{transform:translateY(-40%) scale(1); opacity:0}
+}
+
+/* вид сердца через псевдо-элемент: используем SVG data-uri для компактности */
+.heart::before{
+  content:"";
+  position:absolute; inset:0;
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 29"><path fill="%23ff6b89" d="M23.6 0c-2 0-3.8.9-4.9 2.3C16.2.9 14.4 0 12.4 0 7.3 0 3.6 3.6 3.6 8.6c0 5.5 6.5 10.9 13.4 18.5l.6.6.6-.6C22 19.5 28.4 14 28.4 8.6 28.4 3.6 24.7 0 19.6 0z"/></svg>');
+  background-size:contain;
+  background-repeat:no-repeat;
+  background-position:center;
+}
+
+/* когда активны — поставить выше изображения */
+.with-hearts .hearts{z-index:1}
+.with-hearts .card{z-index:2}
+
+/* подсказка */
+.hint{
+  margin-top:18px;
+  text-align:center;
+  color:#b33a4a;
+}
+
+/* адаптив */
+@media (max-width:480px){
+  :root{--box-w:320px; --box-h:230px}
+}
+
+  </style>
+</head>
+<body>
+  <div class="wrap" id="wrap">
+    <div class="card" id="card" title="Нажми на конверт">
+      <img id="envImg" src="https://b.fotohosting.pro/2026/01/07/1000036018.png" alt="конверт" draggable="false">
+      <div class="hearts" id="hearts" aria-hidden="true"></div>
+    </div>
+  </div>
+  <div class="hint">Нажми на конверт — он дернётся и откроется. Нажми ещё раз — появится бумага и сердца.</div>  <!-- Звуки (используются при кликах) --><audio id="snd-open" preload="auto" src="https://whyp.it/tracks/331128/mixkit-quick-paper-crumple-sound-2996?token=5k1jU"></audio> <audio id="snd-slide" preload="auto" src="https://whyp.it/tracks/331127/mixkit-paper-slide-1530?token=UDP2v"></audio>
+
+  <script>
+    (function(){
+      // пользовательские ссылки (уже подставлены) — менять здесь, если нужно
+      const stages = [
+        'https://b.fotohosting.pro/2026/01/07/1000036018.png', // закрыт
+        'https://a.fotohosting.pro/2026/01/07/1000036019.png', // открыт
+        'https://b.fotohosting.pro/2026/01/07/1000036020.png'  // с бумагой
+      ];
+
+      const card = document.getElementById('card');
+      const img = document.getElementById('envImg');
+      const heartsContainer = document.getElementById('hearts');
+      const wrap = document.getElementById('wrap');
+
+      const sndOpen = document.getElementById('snd-open');
+      const sndSlide = document.getElementById('snd-slide');
+
+      let stage = 0; // 0 = закрыт, 1 = открыт, 2 = бумага
+      const shakeDur = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--shake-dur')) || 420;
+      const shakeMs = isNaN(shakeDur) ? 420 : shakeDur;
+
+      // Прелоад изображений
+      stages.forEach(src => { const i=new Image(); i.src=src; });
+
+      // Создать n сердечек для анимации
+      function createHearts(n=12){
+        heartsContainer.innerHTML = '';
+        for(let i=0;i<n;i++){
+          const h = document.createElement('div');
+          h.className = 'heart';
+          // случайная позиция и задержка
+          const left = Math.random()*100;
+          const delay = Math.random()*2;
+          const dur = 4 + Math.random()*3; // от 4 до 7s
+          h.style.left = left + '%';
+          h.style.animation = `floatUp ${dur}s linear ${delay}s both`;
+          h.style.opacity = 0;
+          h.style.transformOrigin = 'center center';
+          // немного увеличить/уменьшить
+          const scale = 0.8 + Math.random()*0.8;
+          h.style.transform = `translateY(120%) scale(${scale})`;
+          heartsContainer.appendChild(h);
+        }
+      }
+
+      // Включаем/выключаем сердца
+      function showHearts(show){
+        if(show){
+          wrap.classList.add('with-hearts');
+          createHearts(14);
+        } else {
+          wrap.classList.remove('with-hearts');
+          heartsContainer.innerHTML = '';
+        }
+      }
+
+      // Обработчик клика — добавляем шейк, затем меняем состояние
+      let busy = false;
+      card.addEventListener('click', async function(){
+        if(busy) return;
+        busy = true;
+        card.classList.add('shake');
+        // small play to unlock audio on some browsers
+        try{ sndOpen.volume = 1; sndSlide.volume = 1; }catch(e){}
+
+        // ждать конца шейка
+        setTimeout(() => {
+          card.classList.remove('shake');
+
+          // переключаем стадию
+          if(stage === 0){
+            stage = 1;
+            img.src = stages[1];
+            // проиграть звук шуршания (открытие)
+            playSafely(sndOpen);
+            showHearts(false);
+          } else if(stage === 1){
+            stage = 2;
+            img.src = stages[2];
+            playSafely(sndSlide);
+            // показываем плавающие сердца
+            showHearts(true);
+          } else {
+            // при третьем клике вернём в исходное положение
+            stage = 0;
+            img.src = stages[0];
+            showHearts(false);
+          }
+
+          // небольшая задержка прежде чем снова разрешить клики
+          setTimeout(()=>{busy=false;}, 180);
+        }, shakeMs);
+      });
+
+      // Безопасный play: попытаемся выполнить play(), но подавим ошибки (браузер может блокировать звук до взаимодействия)
+      function playSafely(audioEl){
+        if(!audioEl) return;
+        try{
+          audioEl.currentTime = 0;
+        }catch(e){}
+        const p = audioEl.play();
+        if(p && typeof p.then === 'function'){
+          p.catch(()=>{/*ignore*/});
+        }
+      }
+
+      // Небольшая подсказка: если звука не слышно — браузер мог блокировать. Клик по конверту разблокирует звук.
+
+    })();
+  </script></body>
+</html>
